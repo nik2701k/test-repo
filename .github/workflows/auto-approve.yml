@@ -1,0 +1,65 @@
+name: Auto approve
+on:
+  pull_request_target:
+    types: [labeled]
+
+jobs:
+  auto-approve-if-applicable:
+    if: ${{ github.event.label.name == 'auto-approve' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GENERIC_GITHUB_TOKEN }}
+      - shell: bash
+        run: |
+          echo "PR_ACTOR=true" >> $GITHUB_ENV
+      - name: Check number of lines inserted & deleted
+        run: |
+          git fetch --recurse-submodules=no
+          echo "CHANGE_LINES=`git diff --numstat origin/$HEAD_REF..origin/$BASE_REF --format="" "$@" | awk '{ins += $1}{del += $2} END{print ""ins+del""}'`" >> $GITHUB_ENV
+        shell: bash
+        env:
+          HEAD_REF: ${{github.head_ref}}
+          BASE_REF: ${{github.base_ref}}
+      # Approves the PR only if the PR author is in CODEOWNER list and code change should be less then 100 lines
+      - if: env.PR_ACTOR == 'true' && env.CHANGE_LINES < 100
+        uses: hmarr/auto-approve-action@v2
+        id: auto_approve
+        with:
+          github-token: ${{ secrets.GENERIC_GITHUB_TOKEN }}
+      # Approve the PR on blank commit
+      - uses: hmarr/auto-approve-action@v2
+        id: empty_commit
+        if: env.CHANGE_LINES == 0
+        with:
+          github-token: ${{ secrets.GENERIC_GITHUB_TOKEN }}
+
+      - uses: luisrjaeger/approved-event-checker@v1.0.0
+        id: approved
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      # Custom step to check whether last step succeeded or not
+      - if: steps.auto_approve.outcome != 'success' && steps.empty_commit.outcome != 'success' && steps.approved.outputs.approved == 'true'
+        shell: bash
+        run: |
+          REVIEWS=$(curl -L \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.GENERIC_GITHUB_TOKEN }}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/"${{ github.repository }}"/pulls/"${{ github.event.number }}"/reviews)
+          
+          REVIEW_ID=$(echo "$REVIEW" | jq -r '.[] | select(.state == "APPROVED") | .id')
+          
+          for id in "${REVIEW_ID[@]}"; do
+            curl -L \
+              -X PUT \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${{ secrets.GENERIC_GITHUB_TOKEN }}" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              https://api.github.com/repos/"${{ github.repository }}"/pulls/"${{ github.event.number }}"/reviews/"$id"/dismissals \
+              -d '{"message": "Dismissing the approval from workflow"}'
+            echo "Dismissed approval with review ID: $REVIEW_ID"
+          done
