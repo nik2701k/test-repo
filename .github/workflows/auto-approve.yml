@@ -29,13 +29,13 @@ jobs:
         uses: hmarr/auto-approve-action@v2
         id: auto_approve
         with:
-          github-token: ${{{ secrets.GITHUB_TOKEN }}}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
       # Approve the PR on blank commit
       - uses: hmarr/auto-approve-action@v2
         id: empty_commit
         if: env.CHANGE_LINES == 0
         with:
-          github-token: ${{{ secrets.GITHUB_TOKEN }}}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: luisrjaeger/approved-event-checker@1.0.0
         id: approved
